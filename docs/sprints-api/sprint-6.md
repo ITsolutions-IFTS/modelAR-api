@@ -10,6 +10,8 @@
 
 ### ITS-S3-API-006 — Endpoints de Analytics
 
+**Estado: ✅ Implementado** — 2026-05-24
+
 **Responsable:** Sin asignar
 
 **Endpoints:**
@@ -127,15 +129,17 @@ function groupByDate(events: any[]) {
 ```
 
 **Checklist:**
-- [ ] GET /campaigns/:id/analytics funciona
-- [ ] Calcula vistas, AR activations, clicks
-- [ ] Breakdown en porcentaje
-- [ ] Timeline por día (opcional)
-- [ ] Validación: solo datos del cliente autenticado
+- [x] GET /campaigns/:id/analytics funciona
+- [x] Calcula vistas, AR activations, clicks
+- [x] Breakdown en porcentaje
+- [x] Timeline por día (opcional)
+- [x] Validación: solo datos del cliente autenticado
 
 ---
 
 ### ITS-S3-API-007 — Endpoint para registrar eventos (POST /events)
+
+**Estado: ✅ Implementado** — 2026-05-24
 
 **Responsable:** Sin asignar
 
@@ -411,14 +415,42 @@ export function AnalyticsPage() {
 - [ ] El gerente ve las métricas en dashboard
 
 **Checklist:**
-- [ ] POST /events funciona
-- [ ] Registra eventos sin autenticación
-- [ ] Valida campaign_id existe
-- [ ] Valida event_type válido
+- [x] POST /events funciona
+- [x] Registra eventos sin autenticación
+- [x] Valida campaign_id existe
+- [x] Valida event_type válido
+
+---
+
+### ITS-S3-API-009 — Endpoint público de campaña
+
+**Estado: ✅ Implementado** — 2026-05-24
+
+**Responsable:** Betania
+
+Permite al viewer público (ARPage) obtener los datos de una campaña sin autenticación, usando solo el `uid` del modelo Sketchfab como referencia.
+
+**Endpoint:**
+
+```
+GET /api/campaigns/:id/public
+  Auth: NO requerida
+  Params: id (campaignId)
+  Response: { id, title, description, sector, sketchfab_uid, cta_url, qr_value, org_slug }
+  Validaciones:
+    - Campaña existe
+    - No expone datos del cliente (sin client_id, sin analytics)
+```
+
+**Casos de uso:**
+- ARPage carga los datos de campaña (título, sector, CTA) al abrir `/ar/:uid`
+- No requiere login — el usuario final no tiene cuenta
 
 ---
 
 ### ITS-S3-API-008 — Proxy de Sketchfab desde backend
+
+**Estado: ✅ Implementado** — 2026-05-24
 
 **Responsable:** Betania
 
@@ -437,6 +469,11 @@ GET /api/sketchfab/search?keyword=chair&sector=ecommerce&cursor=...
 GET /api/sketchfab/models/:uid
   Auth: NO requerida
   Response: { uid, name, thumbnails, user, license, ... }
+
+GET /api/sketchfab/models/:uid/download
+  Auth: NO requerida
+  Response: { uid, name, download_url, ... }
+  Nota: Expone el link de descarga del GLB desde Sketchfab CDN
 ```
 
 ```ts
@@ -535,11 +572,11 @@ export async function getSketchfabModel(uid: string) {
 ```
 
 **Checklist:**
-- [ ] GET /sketchfab/search funciona
-- [ ] GET /sketchfab/models/:uid funciona
-- [ ] API key no está expuesta en frontend
+- [x] GET /sketchfab/search funciona
+- [x] GET /sketchfab/models/:uid funciona
+- [x] API key no está expuesta en frontend
 - [ ] Rate limiting considerado (opcional)
-- [ ] Frontend consumelibía desde API, no directo a Sketchfab
+- [x] Frontend consumelibía desde API, no directo a Sketchfab
 
 ---
 
@@ -682,12 +719,13 @@ securitySchemes:
 
 ## Checklist de Sprint 6 API
 
-- [ ] GET /campaigns/:id/analytics funciona
-- [ ] Calcula stats y breakdown
-- [ ] POST /events funciona (public)
-- [ ] GET /sketchfab/search funciona
-- [ ] GET /sketchfab/models/:uid funciona
-- [ ] API key no expuesta
+- [x] GET /campaigns/:id/analytics funciona
+- [x] Calcula stats y breakdown
+- [x] POST /events funciona (public)
+- [x] GET /sketchfab/search funciona
+- [x] GET /sketchfab/models/:uid funciona
+- [x] GET /sketchfab/models/:uid/download funciona
+- [x] API key no expuesta en frontend
 - [ ] OpenAPI spec actualizada
 
 ---

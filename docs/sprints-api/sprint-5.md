@@ -10,44 +10,88 @@
 
 ### ITS-S3-API-001 — Setup del proyecto Node + Express + Sequelize
 
+**Estado: ✅ Implementado** — 2026-05-24
+
 **Responsable:** Betania
 
 ```
-Crear: /backend (en raíz del repo)
+modelAR-api/
 ├── package.json
-├── .env.example
-├── .gitignore
-├── src/
-│   ├── index.ts (entry point)
-│   ├── config/
-│   │   ├── database.ts (setup Sequelize)
-│   │   └── env.ts (variables de entorno)
-│   ├── middleware/
-│   │   ├── auth.ts (verificar JWT)
-│   │   └── errorHandler.ts (manejo de errores global)
-│   ├── routes/
-│   │   ├── auth.ts
-│   │   ├── campaigns.ts
-│   │   └── analytics.ts
-│   ├── controllers/
-│   │   ├── authController.ts
-│   │   ├── campaignsController.ts
-│   │   └── analyticsController.ts
-│   ├── models/
-│   │   ├── Client.ts (Sequelize model)
-│   │   ├── Campaign.ts (Sequelize model)
-│   │   └── AnalyticsEvent.ts (Sequelize model)
-│   └── types/
-│       └── index.ts
+├── nodemon.json
+├── tsconfig.json
 ├── migrations/
-│   ├── 20260508-create-client.ts
-│   ├── 20260508-create-campaign.ts
-│   └── 20260508-create-analytics-event.ts
-├── seeders/ (opcional)
-│   └── 20260508-demo-data.ts
-├── tests/ (opcional para Stage 3)
-└── Dockerfile (deployment)
+│   ├── 20260524000001-create-clients.js
+│   ├── 20260524000002-create-campaigns.js
+│   └── 20260524000003-create-analytics-events.js
+└── src/
+    ├── Domain/                        ← Entidades y contratos puros (sin dependencias)
+    │   ├── entities/
+    │   │   ├── campaign.entity.ts
+    │   │   ├── client.entity.ts
+    │   │   └── analytics-event.entity.ts
+    │   ├── repositories/              ← Interfaces (contratos)
+    │   │   ├── campaign.repository.ts
+    │   │   ├── client.repository.ts
+    │   │   └── analytics-event.repository.ts
+    │   ├── errors/index.ts
+    │   └── types/index.ts
+    ├── Application/                   ← Casos de uso (lógica de negocio)
+    │   └── use-cases/
+    │       ├── auth/
+    │       │   ├── login.use-case.ts
+    │       │   └── register.use-case.ts
+    │       ├── campaigns/
+    │       │   ├── create-campaign.use-case.ts
+    │       │   ├── list-campaigns.use-case.ts
+    │       │   ├── get-campaign.use-case.ts
+    │       │   ├── get-public-campaign.use-case.ts
+    │       │   ├── update-campaign.use-case.ts
+    │       │   └── delete-campaign.use-case.ts
+    │       ├── analytics/
+    │       │   ├── track-event.use-case.ts
+    │       │   └── get-campaign-analytics.use-case.ts
+    │       └── sketchfab/
+    │           ├── search-models.use-case.ts
+    │           ├── get-model.use-case.ts
+    │           └── sector-categories.const.ts
+    └── Infrastructure/                ← Express, Sequelize, handlers concretos
+        ├── main.ts                    ← Entry point
+        ├── config/
+        │   ├── database.ts
+        │   ├── env.ts
+        │   └── sequelize-config.json
+        ├── middleware/
+        │   ├── auth.middleware.ts
+        │   ├── error-handler.middleware.ts
+        │   ├── request-logger.middleware.ts
+        │   └── validate-uuid.middleware.ts
+        ├── routes/
+        │   ├── auth.routes.ts
+        │   ├── campaigns.routes.ts
+        │   ├── events.routes.ts
+        │   └── sketchfab.routes.ts
+        ├── controllers/
+        │   ├── auth.controller.ts
+        │   ├── campaigns.controller.ts
+        │   ├── analytics.controller.ts
+        │   ├── events.controller.ts
+        │   └── sketchfab.controller.ts
+        ├── models/                    ← Sequelize models
+        │   ├── client.model.ts
+        │   ├── campaign.model.ts
+        │   └── analytics-event.model.ts
+        ├── repositories/              ← Implementaciones concretas
+        │   ├── client.repository.pg.ts
+        │   ├── campaign.repository.pg.ts
+        │   └── analytics-event.repository.pg.ts
+        ├── externals/
+        │   ├── sketchfab/sketchfab.handler.ts
+        │   └── qr/qr.handler.ts
+        └── lib/
+            └── async-handler.ts
 ```
+
+**Arquitectura:** El proyecto sigue el patrón de capas Domain → Application → Infrastructure. Los use cases dependen solo de interfaces del dominio; la capa de infraestructura inyecta las implementaciones concretas (repositorios PostgreSQL, handlers externos).
 
 **Dependencies:**
 ```json
@@ -92,17 +136,19 @@ npx sequelize-cli init
 ```
 
 **Checklist:**
-- [ ] Carpeta backend creada con estructura inicial
-- [ ] package.json con dependencias
-- [ ] .env.example con variables necesarias
-- [ ] Script `dev`: nodemon para desarrollo
-- [ ] Script `build`: tsc para TypeScript
-- [ ] TypeScript config (tsconfig.json)
-- [ ] Git ignorar node_modules, .env
+- [x] Carpeta backend creada con estructura inicial
+- [x] package.json con dependencias
+- [x] .env.example con variables necesarias
+- [x] Script `dev`: nodemon para desarrollo
+- [x] Script `build`: tsc para TypeScript
+- [x] TypeScript config (tsconfig.json)
+- [x] Git ignorar node_modules, .env
 
 ---
 
 ### ITS-S3-API-002 — Conexión a PostgreSQL + Sequelize Models
+
+**Estado: ✅ Implementado** — 2026-05-24
 
 **Responsable:** Betania
 
@@ -140,6 +186,8 @@ class Client extends Model {
   declare email: string;
   declare password_hash: string;
   declare name: string;
+  declare org_slug: string;          // slug único de la organización del cliente
+  declare role: 'superadmin' | 'client';  // default: 'client'
   declare readonly createdAt: Date;
   declare readonly updatedAt: Date;
 
@@ -200,12 +248,14 @@ import Client from './Client';
 class Campaign extends Model {
   declare id: string;
   declare client_id: ForeignKey<Client['id']>;
+  declare org_slug: string;          // denormalizado para queries rápidas por organización
   declare title: string;
   declare description: string;
-  declare sector: 'ecommerce' | 'turismo' | 'educacion';
+  declare sector: 'ecommerce' | 'turismo' | 'educacion' | 'inmobiliario' | 'museo';
   declare sketchfab_uid: string;
   declare cta_url: string;
-  declare qr_code: string;
+  declare qr_value: string;
+  declare collection_id: string | null;  // FK a colección de Sketchfab (opcional)
   declare readonly createdAt: Date;
   declare readonly updatedAt: Date;
 }
@@ -318,17 +368,19 @@ export default AnalyticsEvent;
 ```
 
 **Checklist:**
-- [ ] PostgreSQL corriendo localmente
-- [ ] .env con credenciales DB
-- [ ] Sequelize instalado
-- [ ] 3 models creados (Client, Campaign, AnalyticsEvent)
-- [ ] `npm run db:sync` o migrations ejecutadas
-- [ ] Tablas creadas en DB
-- [ ] Relaciones definidas
+- [x] PostgreSQL corriendo localmente
+- [x] .env con credenciales DB
+- [x] Sequelize instalado
+- [x] 3 models creados (Client, Campaign, AnalyticsEvent)
+- [x] `npm run db:sync` o migrations ejecutadas
+- [x] Tablas creadas en DB
+- [x] Relaciones definidas
 
 ---
 
 ### ITS-S3-API-003 — Autenticación JWT
+
+**Estado: ✅ Implementado** — 2026-05-24
 
 **Responsable:** Betania
 
@@ -386,17 +438,19 @@ export function authMiddleware(req, res, next) {
 - [ ] CORS configurado (solo itsolutions.com)
 
 **Checklist:**
-- [ ] POST /auth/register funciona
-- [ ] POST /auth/login funciona
-- [ ] JWT generado y verificado
-- [ ] Middleware auth protege endpoints privados
-- [ ] POST /auth/logout (solo limpia frontend)
-- [ ] GET /auth/me devuelve cliente autenticado
-- [ ] Errores manejan casos edge (email ya existe, etc)
+- [x] POST /auth/register funciona
+- [x] POST /auth/login funciona
+- [x] JWT generado y verificado
+- [x] Middleware auth protege endpoints privados
+- [x] POST /auth/logout (solo limpia frontend)
+- [x] GET /auth/me devuelve cliente autenticado
+- [x] Errores manejan casos edge (email ya existe, etc)
 
 ---
 
 ### ITS-S3-API-004 — Endpoints CRUD de Campaigns (sin lógica de Sketchfab)
+
+**Estado: ✅ Implementado** — 2026-05-24
 
 **Responsable:** Sin asignar
 
@@ -455,16 +509,18 @@ export async function getCampaigns(req, res) {
 ```
 
 **Checklist:**
-- [ ] GET /campaigns devuelve solo mis campañas
-- [ ] POST /campaigns crea nueva
-- [ ] GET /campaigns/:id valida pertenencia
-- [ ] PATCH /campaigns/:id edita
-- [ ] DELETE /campaigns/:id elimina
-- [ ] Error handling: 401 si no auth, 403 si no es mi campaña, 400 si dato inválido
+- [x] GET /campaigns devuelve solo mis campañas
+- [x] POST /campaigns crea nueva
+- [x] GET /campaigns/:id valida pertenencia
+- [x] PATCH /campaigns/:id edita
+- [x] DELETE /campaigns/:id elimina
+- [x] Error handling: 401 si no auth, 403 si no es mi campaña, 400 si dato inválido
 
 ---
 
 ### ITS-S3-API-005 — Generación de QR automático
+
+**Estado: ✅ Implementado** — 2026-05-24
 
 **Responsable:** Sin asignar
 
@@ -511,9 +567,9 @@ export async function createCampaign(req, res) {
 ```
 
 **Checklist:**
-- [ ] Librería qrcode instalada
-- [ ] QR generado automáticamente al crear campaña
-- [ ] QR apunta a: itsolutions.com/experience/{id}
+- [x] Librería qrcode instalada
+- [x] QR generado automáticamente al crear campaña
+- [x] QR apunta a: itsolutions.com/experience/{id}
 - [ ] QR puede descargarse (endpoint para descargar imagen)
 - [ ] QR funciona al escanear (test manual)
 
