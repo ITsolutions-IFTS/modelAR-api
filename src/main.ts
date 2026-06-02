@@ -70,6 +70,13 @@ app.post('/api/curated-models', forward);
 app.patch('/api/curated-models/:id', forward);
 app.delete('/api/curated-models/:id', forward);
 
+// Organizations (lectura para cualquier auth user; escritura solo SUPERADMIN)
+app.get('/api/organizations', forward);
+app.get('/api/organizations/:slug', forward);
+app.post('/api/organizations', forward);
+app.patch('/api/organizations/:slug', forward);
+app.delete('/api/organizations/:slug', forward);
+
 app.use((_req, res) => {
   res.status(404).json({
     error: {
