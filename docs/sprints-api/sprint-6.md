@@ -634,138 +634,124 @@ DELETE /api/collections/:id      Auth: Requerida — elimina
 
 ## Informe
 
-### ITS-S3-API-DOC-002 — OpenAPI spec
+### ITS-S3-API-DOC-002 — Proxy OpenAPI spec | ⏳ Betania
 
-**Archivo:** `backend/openapi.yaml`
+> **Reenfocado en Stage 4:** dado que `modelar-api` dejó de implementar lógica de negocio (ver §"Cambios técnicos del gateway"), el spec describe ahora la **superficie HTTP que el gateway proxya**, no un backend con DB. El gateway no transforma payloads — devuelve la respuesta del core tal cual. Por eso este spec documenta el contrato del proxy y referencia al core (servicio externo) como fuente de verdad de cada response.
+
+**Archivo:** `openapi.yaml` en la raíz de `modelar-api`.
 
 ```yaml
-openapi: 3.0.0
+openapi: 3.0.3
 info:
-  title: ITSolutions AR API
+  title: modelar-api (gateway)
   version: 1.0.0
-  description: Backend API para plataforma de realidad aumentada
+  description: |
+    Gateway HTTP fino sin estado. Recibe requests del frontend, los reenvía
+    a `modelar-core` (NestJS, API externa) preservando los headers Authorization,
+    x-request-id, x-forwarded-for y x-real-ip. Devuelve el status y body del
+    upstream tal cual. Timeout 10s — si el core no responde, el gateway
+    devuelve 503 SERVICE_UNAVAILABLE con la forma canónica de error.
 
 servers:
-  - url: http://localhost:5000/api
-    description: Development
-  - url: https://api.itsolutions.com/api
-    description: Production
+  - url: http://localhost:3000
+    description: Development local (CORE_URL apunta a http://localhost:4000)
+  - url: https://api.modelar.com
+    description: Producción
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:        { type: string, example: NOT_FOUND }
+            message:
+              oneOf:
+                - { type: string }
+                - { type: array, items: { type: string } }
+            statusCode:  { type: integer, example: 404 }
+            timestamp:   { type: string, format: date-time }
+            path:        { type: string }
+            requestId:   { type: string, format: uuid }
+            details:     { type: object, additionalProperties: true }
+
+    PaginatedResponse:
+      type: object
+      properties:
+        data: { type: array, items: { type: object } }
+        pagination:
+          type: object
+          properties:
+            page:       { type: integer }
+            limit:      { type: integer }
+            total:      { type: integer }
+            totalPages: { type: integer }
 
 paths:
-  /auth/login:
-    post:
-      summary: Login
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                password:
-                  type: string
-      responses:
-        '200':
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  token:
-                    type: string
-                  client:
-                    type: object
-
-  /campaigns:
+  /health:
     get:
-      summary: List my campaigns
-      security:
-        - BearerAuth: []
+      summary: Health del gateway + del core (upstream)
       responses:
         '200':
-          description: List of campaigns
-    post:
-      summary: Create campaign
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - title
-                - sector
-                - sketchfab_uid
-                - cta_url
-              properties:
-                title:
-                  type: string
-                description:
-                  type: string
-                sector:
-                  type: string
-                  enum: ['ecommerce', 'turismo', 'educacion']
-                sketchfab_uid:
-                  type: string
-                cta_url:
-                  type: string
-      responses:
-        '201':
-          description: Campaign created
+          description: |
+            Reporta el estado propio (`status: ok`) y el del core
+            (`core: ok | unavailable`).
 
-  /campaigns/{id}/analytics:
-    get:
-      summary: Get campaign analytics
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Analytics data
+  # === Auth (proxy a modelar-core) ===
+  /api/auth/register: { post: { $ref: '#/components/x-proxied' } }
+  /api/auth/login:    { post: { $ref: '#/components/x-proxied' } }
+  /api/auth/refresh:  { post: { $ref: '#/components/x-proxied' } }
+  /api/auth/logout:   { post: { $ref: '#/components/x-proxied' } }
+  /api/auth/me:       { get:  { $ref: '#/components/x-proxied-auth' } }
 
-  /events:
-    post:
-      summary: Register event (public)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - campaign_id
-                - event_type
-              properties:
-                campaign_id:
-                  type: string
-                event_type:
-                  type: string
-                  enum: ['view', 'ar_activation', 'cta_click']
-      responses:
-        '200':
-          description: Event recorded
+  # === Campaigns (proxy) ===
+  /api/campaigns:                  { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
+  /api/campaigns/{id}:             { get: { $ref: '#/components/x-proxied-auth' }, patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
+  /api/campaigns/{id}/public:      { get: { $ref: '#/components/x-proxied' } }
+  /api/campaigns/{id}/analytics:   { get: { $ref: '#/components/x-proxied-auth' } }
 
-securitySchemes:
-  BearerAuth:
-    type: http
-    scheme: bearer
-    bearerFormat: JWT
+  # === Collections (proxy) ===
+  /api/collections:           { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
+  /api/collections/{id}:      { get: { $ref: '#/components/x-proxied-auth' }, patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
+
+  # === Analytics (proxy) ===
+  /api/events: { post: { $ref: '#/components/x-proxied' } }   # público, rate-limited en el core por IP
+
+  # === Sketchfab (proxy con cache+merge en el core) ===
+  /api/sketchfab/models:        { get: { $ref: '#/components/x-proxied-auth' } }
+  /api/sketchfab/models/{uid}:  { get: { $ref: '#/components/x-proxied-auth' } }
+
+  # === Curated Models (proxy — SUPERADMIN en el core) ===
+  /api/curated-models:        { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
+  /api/curated-models/{id}:   { patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
+
+  # === Organizations (proxy — escritura SUPERADMIN en el core) ===
+  /api/organizations:           { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
+  /api/organizations/{slug}:    { get: { $ref: '#/components/x-proxied-auth' }, patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
 ```
 
+**Notas:**
+
+- Las responses concretas (200/201/204/4xx) las define `modelar-core`. El gateway solo agrega `503` cuando el upstream falla. La forma canónica del error (`ErrorResponse`) está documentada arriba.
+- Los listados que paginan devuelven `PaginatedResponse` (`{ data, pagination }`). Los GET por id devuelven la entidad. Los DELETE devuelven `204 No Content`.
+- Bearer JWT es access token (vida 15m); el refresh se hace contra `POST /api/auth/refresh` con el refresh token en el body.
+- El gateway preserva los headers `Authorization`, `x-request-id`, `x-forwarded-for`, `x-real-ip`. Ningún otro header se reenvía.
+
 **Checklist:**
-- [ ] OpenAPI spec creado
-- [ ] Todos los endpoints documentados
-- [ ] Ejemplos de request/response
+
+- [ ] `openapi.yaml` creado en la raíz de `modelar-api`
+- [ ] Cubre las 24 rutas que el gateway expone
+- [ ] Documenta forma canónica de error (`ErrorResponse`) y paginada (`PaginatedResponse`)
+- [ ] Anota explícitamente que las responses concretas las define `modelar-core`
+- [ ] Validado con Swagger UI o Redoc local antes de incluir en el PDF de entrega
 
 ---
 
