@@ -769,6 +769,142 @@ securitySchemes:
 
 ---
 
+## Cambios técnicos del gateway
+
+A partir de este sprint `modelar-api` deja de implementar lógica de negocio: pasa a funcionar como **gateway/proxy fino** y delega todo a un servicio externo, `modelar-core` (NestJS, repo privado `git@github.com:Mbetania/modelar-core.git`).
+
+### Rol del gateway
+
+Express puro, sin estado, sin DB. Solo:
+
+- Recibe requests del frontend en el puerto 3000.
+- Aplica middleware transversal (helmet, cors, body-parser, x-request-id).
+- Reenvía a `${CORE_URL}` preservando headers de auth y tracing.
+- Devuelve la respuesta del core tal cual (status code, body, content-type).
+- Si el core no responde (timeout 10s) devuelve `503 SERVICE_UNAVAILABLE` con shape canónica.
+
+Las 24 rutas `/api/*` se delegan a un único handler `forward(req, res)`. El gateway **no** conoce el modelo de datos, los use cases, ni las reglas de autorización: todo eso vive en el core.
+
+### Configuración
+
+```bash
+# modelar-api/.env
+PORT=3000
+CORE_URL=http://localhost:4000          # dev local
+# CORE_URL=https://core.modelar.app     # producción
+```
+
+Cualquier instancia del gateway es intercambiable: no guarda sesión, ni cache, ni conexiones a DB. Eso permite escalarlo horizontalmente sin coordinar estado.
+
+### Implementación de `forward()`
+
+`src/proxy/forward.ts` — reenvía cada request al core con un subset acotado de headers:
+
+```ts
+const FORWARDED_HEADERS = ['authorization', 'x-request-id', 'x-forwarded-for', 'x-real-ip'];
+
+export async function forward(req, res) {
+  const url = new URL(req.originalUrl, env.CORE_URL);
+
+  const headers = { 'Content-Type': 'application/json' };
+  for (const name of FORWARDED_HEADERS) {
+    const value = req.headers[name];
+    if (typeof value === 'string') headers[name] = value;
+  }
+
+  const hasBody = ['POST', 'PATCH', 'PUT'].includes(req.method);
+  const upstream = await fetch(url.toString(), {
+    method: req.method,
+    headers,
+    body: hasBody ? JSON.stringify(req.body) : undefined,
+    signal: controller.signal, // timeout 10s
+  });
+
+  res.status(upstream.status).send(await upstream.text());
+}
+```
+
+Por qué reenviar esos headers en particular:
+- **`Authorization`** — el core valida el JWT.
+- **`x-request-id`** — distributed tracing (el core loggea con pino e incluye el id).
+- **`x-forwarded-for` / `x-real-ip`** — el core los usa para rate limiting por IP en endpoints públicos (ej. `POST /api/events`).
+
+### Rutas agregadas en este sprint
+
+Las 5 rutas de Organizations se agregaron al registro de Express (todas delegadas a `forward`):
+
+```ts
+// Organizations (lectura para cualquier auth user; escritura solo SUPERADMIN)
+app.get('/api/organizations',         forward);
+app.get('/api/organizations/:slug',   forward);
+app.post('/api/organizations',        forward);
+app.patch('/api/organizations/:slug', forward);
+app.delete('/api/organizations/:slug', forward);
+```
+
+El identificador en URL es `slug` (kebab-case), no UUID. El gateway no valida el rol — `@Roles(Role.SUPERADMIN)` lo aplica el `RolesGuard` global del core.
+
+### Recursos disponibles via core
+
+| Recurso | Endpoints (prefijo `/api`) | Auth |
+|---------|----------------------------|------|
+| Auth | `register`, `login`, `refresh`, `logout`, `me` | Mixto |
+| **Organizations** (nuevo) | `GET`, `GET /:slug`, `POST`, `PATCH /:slug`, `DELETE /:slug` | Lectura cualquier auth · escritura SUPERADMIN |
+| Campaigns | CRUD por id | Cliente dueño · `/:id/public` sin auth |
+| Collections | CRUD por id | Multi-tenant por orgSlug |
+| Analytics | `POST /events` (público, rate-limited), `GET /campaigns/:id/analytics` | Mixto |
+| Sketchfab | `GET /sketchfab/models`, `GET /sketchfab/models/:uid` | Auth · cache Redis + merge curated models |
+| Curated Models | CRUD por id | SUPERADMIN |
+
+### Forma canónica de los errores
+
+El gateway no formatea errores: usa la shape canónica que devuelve el `DomainExceptionFilter` del core:
+
+```json
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Organization with slug \"x\" already exists",
+    "statusCode": 409,
+    "timestamp": "2026-06-01T23:52:01.022Z",
+    "path": "/api/organizations",
+    "requestId": "82dcbf95-...",
+    "details": { "slug": "x" }
+  }
+}
+```
+
+Si el core está caído o el timeout vence:
+
+```json
+{
+  "error": {
+    "code": "SERVICE_UNAVAILABLE",
+    "message": "Core service unavailable",
+    "statusCode": 503
+  }
+}
+```
+
+### `GET /health`
+
+Además de reportar `ok` propio, consulta `${CORE_URL}/health` y devuelve el estado del upstream:
+
+```json
+{ "status": "ok", "core": "ok" }
+{ "status": "ok", "core": "unavailable" }
+```
+
+Útil para monitoreo y para que el frontend reaccione a degradaciones del backend.
+
+### Por qué core es repo separado y privado
+
+- `modelar-api` y `modelar-web` se van a compartir con otra gente del equipo / la cátedra para integrar o extender.
+- `modelar-core` contiene la lógica de negocio y los secretos de plataforma — queda restringido al owner.
+- Cualquiera puede levantar el gateway local apuntándolo a la instancia productiva del core, sin necesidad de acceso al código del core ni a credenciales de DB.
+
+---
+
 ## Checklist de Sprint 6 API
 
 - [x] GET /api/campaigns/:id/analytics funciona
@@ -780,6 +916,10 @@ securitySchemes:
 - [x] GET/POST/PATCH/DELETE /api/collections — CRUD completo con isolación por org
 - [x] cta_url nullable en campaigns
 - [x] 13 tests unitarios (jest) — use-cases de campaigns y collections
+- [x] modelar-api convertido en gateway/proxy fino — toda la lógica delegada a modelar-core (servicio externo)
+- [x] 5 rutas de Organizations agregadas al gateway (GET / GET:slug / POST / PATCH / DELETE)
+- [x] `CORE_URL` configurable por env, timeout 10s con 503 canónico ante fallo del upstream
+- [x] `/health` reporta el estado del core además del propio
 - [ ] OpenAPI spec actualizada
 
 ---
