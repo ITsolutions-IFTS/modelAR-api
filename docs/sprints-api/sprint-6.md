@@ -1,8 +1,8 @@
-# Sprint 6 — Analytics API + Búsqueda Sketchfab en Backend
+# Sprint 6 — Analytics API + Búsqueda Sketchfab + Gateway
 
-**Semana:** 3 de Stage 3  
-**Objetivo:** Endpoints de analytics y proxy de Sketchfab desde backend  
-**Tech:** Node.js + Express
+**Semana:** 3 de Stage 3
+**Objetivo:** Endpoints de analytics, proxy de Sketchfab y migración de `modelAR-api` a gateway/proxy fino
+**Tech:** Node.js + Express · NestJS (modelar-core)
 
 ---
 
@@ -10,409 +10,28 @@
 
 ### ITS-S3-API-006 — Endpoints de Analytics
 
-**Estado: ✅ Implementado** — 2026-05-24
+**Estado: ✅ Implementado** — 2026-05-24 · **Resuelto en modelar-core**
 
-**Responsable:** Sin asignar
+**Responsable:** Betania
 
-**Endpoints:**
-
-```
-GET /api/campaigns/:id/analytics
-  Auth: Requerida
-  Params: campaignId
-  Query (opcional): ?since=2024-01-01&until=2024-01-31
-  Response: {
-    campaign: { id, title, sector },
-    stats: {
-      views: 1250,
-      ar_activations: 280,
-      cta_clicks: 85,
-      avg_duration_sec: 165
-    },
-    breakdown: {
-      views: { count: 1250, pct: 100 },
-      ar_activations: { count: 280, pct: 22.4 },
-      cta_clicks: { count: 85, pct: 30.4 }  // 30.4% de AR activations
-    },
-    timeline: [
-      { date: "2024-01-15", views: 50, ar: 12, clicks: 3 },
-      ...
-    ]
-  }
-  Validaciones:
-    - Campaña pertenece al cliente autenticado
-```
-
-```ts
-// controllers/analyticsController.ts
-export async function getCampaignAnalytics(req, res) {
-  const { id: campaignId } = req.params;
-  const { since, until } = req.query;
-
-  try {
-    // 1. Validar que la campaña pertenece al cliente
-    const campaign = await db('campaigns')
-      .where('id', campaignId)
-      .where('client_id', req.clientId)
-      .first();
-
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    // 2. Obtener eventos
-    let query = db('analytics_events').where('campaign_id', campaignId);
-
-    if (since) query = query.where('timestamp', '>=', new Date(since));
-    if (until) query = query.where('timestamp', '<=', new Date(until));
-
-    const events = await query;
-
-    // 3. Calcular estadísticas
-    const stats = {
-      views: events.length,
-      ar_activations: events.filter(e => e.event_type === 'ar_activation').length,
-      cta_clicks: events.filter(e => e.event_type === 'cta_click').length,
-    };
-
-    const breakdown = {
-      views: { 
-        count: stats.views, 
-        pct: 100 
-      },
-      ar_activations: { 
-        count: stats.ar_activations, 
-        pct: stats.views > 0 ? (stats.ar_activations / stats.views * 100).toFixed(1) : 0
-      },
-      cta_clicks: {
-        count: stats.cta_clicks,
-        pct: stats.ar_activations > 0 ? (stats.cta_clicks / stats.ar_activations * 100).toFixed(1) : 0
-      },
-    };
-
-    // 4. Timeline (opcional: agrupar por día)
-    const timeline = groupByDate(events);
-
-    res.json({
-      campaign: {
-        id: campaign.id,
-        title: campaign.title,
-        sector: campaign.sector,
-      },
-      stats,
-      breakdown,
-      timeline,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-}
-
-function groupByDate(events: any[]) {
-  const grouped: Record<string, any> = {};
-  
-  events.forEach(event => {
-    const date = new Date(event.timestamp).toISOString().split('T')[0];
-    if (!grouped[date]) {
-      grouped[date] = { views: 0, ar: 0, clicks: 0 };
-    }
-    if (event.event_type === 'view') grouped[date].views++;
-    if (event.event_type === 'ar_activation') grouped[date].ar++;
-    if (event.event_type === 'cta_click') grouped[date].clicks++;
-  });
-
-  return Object.entries(grouped).map(([date, data]) => ({
-    date,
-    ...data,
-  }));
-}
-```
+`GET /api/campaigns/:id/analytics` devuelve las estadísticas agregadas de una campaña: vistas, activaciones AR, clicks al CTA y breakdown en porcentaje. Solo accesible para el cliente dueño de la campaña. Acepta filtros opcionales `?since=` y `?until=` para acotar el rango de fechas. El timeline agrupa los eventos por día.
 
 **Checklist:**
 - [x] GET /campaigns/:id/analytics funciona
 - [x] Calcula vistas, AR activations, clicks
 - [x] Breakdown en porcentaje
-- [x] Timeline por día (opcional)
+- [x] Timeline por día
 - [x] Validación: solo datos del cliente autenticado
 
 ---
 
 ### ITS-S3-API-007 — Endpoint para registrar eventos (POST /events)
 
-**Estado: ✅ Implementado** — 2026-05-24
+**Estado: ✅ Implementado** — 2026-05-24 · **Resuelto en modelar-core**
 
-**Responsable:** Sin asignar
+**Responsable:** Betania
 
----
-
-## 📊 ¿QUÉ SON LOS EVENTOS?
-
-Los eventos son registros de acciones que hace un usuario final en el viewer de AR. Son **métricas sin datos personales** que permiten al gerente ver cómo se comporta su campaña.
-
-### Ejemplo de vida real
-
-```
-USUARIO FINAL SCANNEA QR EN UNA TIENDA
-│
-├─ 14:30:00 → Abre itsolutions.com/experience/ABC123
-│             Genera EVENTO 1: "view" (vio el modelo)
-│
-├─ 14:30:15 → Toca el modelo para activar AR
-│             Genera EVENTO 2: "ar_activation" (activó AR)
-│
-├─ 14:30:45 → Manipula el modelo 3 min en AR
-│             (sin evento, solo interacción interna)
-│
-└─ 14:34:00 → Toca botón "Ver en tienda"
-              Genera EVENTO 3: "cta_click" (hizo conversión)
-              → Redirige a muebleria.com/producto/sillon
-
-RESULTADO EN BD:
-┌─────────────────────────────────────────┐
-│ analytics_events                         │
-├─────────────────────────────────────────┤
-│ id | campaign_id | event_type | time    │
-├─────────────────────────────────────────┤
-│ 1  | ABC123      | view       | 14:30:00│
-│ 2  | ABC123      | ar_activation| 14:30:15│
-│ 3  | ABC123      | cta_click  | 14:34:00│
-└─────────────────────────────────────────┘
-
-GERENTE VE EN DASHBOARD:
-┌──────────────────────────────────┐
-│ Analytics: "Sillón Windsor"      │
-├──────────────────────────────────┤
-│ Vistas: 1.250                    │
-│ AR activaciones: 280 (22%)       │
-│ Clicks CTA: 85 (30% de AR)       │
-│ Tasa de conversión: 24% (85/1250)│
-└──────────────────────────────────┘
-```
-
----
-
-## 💻 IMPLEMENTACIÓN
-
-**Endpoint:**
-
-```
-POST /api/events
-  Auth: NO requerida (es público, usado desde viewer)
-  Body: {
-    campaign_id: "uuid",
-    event_type: "view" | "ar_activation" | "cta_click"
-  }
-  Response: { success: true }
-```
-
-**Implementación backend:**
-```ts
-// controllers/eventsController.ts
-import { Request, Response } from 'express';
-import { AnalyticsEvent, Campaign } from '../models';
-
-export async function trackEvent(req: Request, res: Response) {
-  try {
-    const { campaign_id, event_type } = req.body;
-
-    // Validación 1: campos requeridos
-    if (!campaign_id || !event_type) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: campaign_id, event_type' 
-      });
-    }
-
-    // Validación 2: event_type válido
-    const validTypes = ['view', 'ar_activation', 'cta_click'];
-    if (!validTypes.includes(event_type)) {
-      return res.status(400).json({ 
-        error: `Invalid event_type. Must be one of: ${validTypes.join(', ')}`
-      });
-    }
-
-    // Validación 3: campaña existe
-    const campaign = await Campaign.findByPk(campaign_id);
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    // Crear evento
-    const event = await AnalyticsEvent.create({
-      campaign_id,
-      event_type,
-      timestamp: new Date(),
-      user_agent: req.headers['user-agent'], // (opcional) para detectar mobile/desktop
-    });
-
-    res.json({ 
-      success: true,
-      event: {
-        id: event.id,
-        campaign_id: event.campaign_id,
-        event_type: event.event_type,
-        timestamp: event.timestamp,
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-}
-```
-
-```ts
-// routes/events.ts
-import express from 'express';
-import { trackEvent } from '../controllers/eventsController';
-
-const router = express.Router();
-
-// POST /api/events - Registrar evento (público, sin auth)
-router.post('/events', trackEvent);
-
-export default router;
-```
-
----
-
-## 📱 CÓMO SE USA DESDE EL FRONTEND
-
-**En la página /experience/:campaignId:**
-
-```tsx
-// pages/ARPage.tsx (el viewer público)
-import { useEffect } from 'react';
-
-export function ARPage() {
-  const { campaignId } = useParams();
-
-  // EVENTO 1: Usuario abrió la página
-  useEffect(() => {
-    trackEvent(campaignId, 'view');
-  }, [campaignId]);
-
-  // EVENTO 2: Usuario activó AR
-  function handleARActivation() {
-    trackEvent(campaignId, 'ar_activation');
-    // ... mostrar modelo en AR
-  }
-
-  // EVENTO 3: Usuario hizo click en CTA
-  function handleCTAClick(url: string) {
-    trackEvent(campaignId, 'cta_click');
-    window.location.href = url; // Redirigir a tienda
-  }
-
-  return (
-    <div>
-      {/* Modelo 3D */}
-      <div onTouchStart={handleARActivation}>
-        {/* ... */}
-      </div>
-      
-      {/* Botón CTA */}
-      <button onClick={() => handleCTAClick(ctaUrl)}>
-        Ver en tienda
-      </button>
-    </div>
-  );
-}
-
-// Función auxiliar para registrar eventos
-async function trackEvent(campaignId: string, eventType: 'view' | 'ar_activation' | 'cta_click') {
-  try {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE}/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        campaign_id: campaignId,
-        event_type: eventType,
-      }),
-    });
-
-    if (!res.ok) {
-      console.error('Failed to track event:', await res.json());
-      return;
-    }
-
-    console.log(`Event tracked: ${eventType}`);
-  } catch (err) {
-    console.error('Event tracking failed:', err);
-    // Silenciamos el error para no interrumpir la UX
-  }
-}
-```
-
----
-
-## 📊 CÓMO EL GERENTE VE ESTOS EVENTOS
-
-**En el dashboard admin:**
-
-```tsx
-// pages/admin/AnalyticsPage.tsx
-export function AnalyticsPage() {
-  const { campaignId } = useParams();
-  const [analytics, setAnalytics] = useState(null);
-
-  useEffect(() => {
-    // Obtener analytics de esta campaña
-    fetch(`${API_BASE}/campaigns/${campaignId}/analytics`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-      .then(res => res.json())
-      .then(data => setAnalytics(data));
-  }, [campaignId]);
-
-  return (
-    <div className="analytics-page">
-      <h2>{analytics?.campaign.title}</h2>
-      
-      <div className="stats">
-        <div className="stat">
-          <p className="stat__label">Vistas</p>
-          <p className="stat__value">{analytics?.stats.views}</p>
-        </div>
-        
-        <div className="stat">
-          <p className="stat__label">AR Activaciones</p>
-          <p className="stat__value">{analytics?.stats.ar_activations}</p>
-          <p className="stat__pct">{analytics?.breakdown.ar_activations.pct}%</p>
-        </div>
-        
-        <div className="stat">
-          <p className="stat__label">Conversiones (CTA clicks)</p>
-          <p className="stat__value">{analytics?.stats.cta_clicks}</p>
-          <p className="stat__pct">{analytics?.breakdown.cta_clicks.pct}%</p>
-        </div>
-      </div>
-
-      <div className="timeline">
-        <h3>Actividad por día</h3>
-        {analytics?.timeline.map(day => (
-          <div key={day.date}>
-            <p>{day.date}: {day.views} vistas, {day.ar} AR, {day.clicks} conversiones</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-```
-
----
-
-## ✅ CHECKLIST DE EVENTOS
-
-**Para que funcione bien:**
-- [ ] POST /events sin auth funciona
-- [ ] Valida campaign_id existe
-- [ ] Valida event_type es válido
-- [ ] Inserta en tabla analytics_events
-- [ ] Frontend registra 'view' al abrir /experience/:id
-- [ ] Frontend registra 'ar_activation' al activar AR
-- [ ] Frontend registra 'cta_click' al hacer click en CTA
-- [ ] GET /campaigns/:id/analytics agrega correctamente los eventos
-- [ ] El gerente ve las métricas en dashboard
+`POST /api/events` es público (sin auth) y recibe eventos del viewer AR: `view` (usuario abrió la página), `ar_activation` (activó AR) y `cta_click` (click en el botón de destino). Valida que `campaign_id` exista y que `event_type` sea uno de los tres tipos válidos. Los eventos se insertan en la tabla `analytics_events` con timestamp e `user_agent`.
 
 **Checklist:**
 - [x] POST /events funciona
@@ -422,183 +41,40 @@ export function AnalyticsPage() {
 
 ---
 
-### ITS-S3-API-009 — Endpoint público de campaña
-
-**Estado: ✅ Implementado** — 2026-05-24
-
-**Responsable:** Betania
-
-Permite al viewer público (ARPage) obtener los datos de una campaña sin autenticación, usando solo el `uid` del modelo Sketchfab como referencia.
-
-**Endpoint:**
-
-```
-GET /api/campaigns/:id/public
-  Auth: NO requerida
-  Params: id (campaignId)
-  Response: { id, title, description, sector, sketchfab_uid, cta_url, qr_value, org_slug }
-  Validaciones:
-    - Campaña existe
-    - No expone datos del cliente (sin client_id, sin analytics)
-```
-
-**Casos de uso:**
-- ARPage carga los datos de campaña (título, sector, CTA) al abrir `/ar/:uid`
-- No requiere login — el usuario final no tiene cuenta
-
----
-
 ### ITS-S3-API-008 — Proxy de Sketchfab desde backend
 
-**Estado: ✅ Implementado** — 2026-05-24
+**Estado: ✅ Implementado** — 2026-05-24 · **Resuelto en modelar-core**
 
 **Responsable:** Betania
 
-**Motivos:**
-- Evitar exponer API key de Sketchfab en frontend
-- Caching opcional
-- Control de rate limiting
-
-**Endpoints:**
-
-```
-GET /api/sketchfab/search?keyword=chair&sector=ecommerce&cursor=...
-  Auth: NO requerida (para demo pública)
-  Response: { results: [...], next: "cursor" }
-
-GET /api/sketchfab/models/:uid
-  Auth: NO requerida
-  Response: { uid, name, thumbnails, user, license, ... }
-
-GET /api/sketchfab/models/:uid/download
-  Auth: NO requerida
-  Response: { uid, name, download_url, ... }
-  Nota: Expone el link de descarga del GLB desde Sketchfab CDN
-```
-
-```ts
-// services/sketchfabService.ts
-import fetch from 'node-fetch';
-
-const SKETCHFAB_API = 'https://api.sketchfab.com/v3';
-const API_KEY = process.env.SKETCHFAB_API_KEY;
-
-export async function searchModels(keyword?: string, categories?: string[], cursor?: string) {
-  const params = new URLSearchParams();
-  
-  if (keyword) params.append('q', keyword);
-  if (categories?.length) params.append('categories', categories.join(','));
-  if (cursor) params.append('cursor', cursor);
-  params.append('count', '24');
-
-  const url = `${SKETCHFAB_API}/models?${params}`;
-  
-  const res = await fetch(url, {
-    headers: { 'Authorization': `Token ${API_KEY}` },
-  });
-
-  if (!res.ok) throw new Error(`Sketchfab API error: ${res.status}`);
-  
-  return res.json();
-}
-
-export async function getModel(uid: string) {
-  const res = await fetch(`${SKETCHFAB_API}/models/${uid}`, {
-    headers: { 'Authorization': `Token ${API_KEY}` },
-  });
-
-  if (!res.ok) throw new Error(`Sketchfab API error: ${res.status}`);
-  
-  return res.json();
-}
-```
-
-```ts
-// routes/sketchfab.ts
-router.get('/sketchfab/search', async (req, res) => {
-  const { keyword, sector, cursor } = req.query;
-
-  try {
-    // Opcional: mapear sector a categorías Sketchfab
-    const categories = sector
-      ? SECTOR_META[sector as string].categories.map(c => c.slug)
-      : undefined;
-
-    const result = await searchModels(
-      keyword as string,
-      categories,
-      cursor as string
-    );
-
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/sketchfab/models/:uid', async (req, res) => {
-  const { uid } = req.params;
-
-  try {
-    const model = await getModel(uid);
-    res.json(model);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-```
-
-**En frontend (actualizar):**
-```ts
-// services/api.ts (NEW)
-const API_BASE = import.meta.env.VITE_API_BASE;
-
-export async function searchSketchfabModels(keyword?: string, sector?: string, cursor?: string) {
-  const params = new URLSearchParams();
-  if (keyword) params.append('keyword', keyword);
-  if (sector) params.append('sector', sector);
-  if (cursor) params.append('cursor', cursor);
-
-  const res = await fetch(`${API_BASE}/sketchfab/search?${params}`);
-  if (!res.ok) throw new Error('Search failed');
-  return res.json();
-}
-
-export async function getSketchfabModel(uid: string) {
-  const res = await fetch(`${API_BASE}/sketchfab/models/${uid}`);
-  if (!res.ok) throw new Error('Model not found');
-  return res.json();
-}
-```
+`GET /api/sketchfab/models` y `GET /api/sketchfab/models/:uid` hacen proxy a la API de Sketchfab manteniendo la API key en el servidor. El core mapea el parámetro `sector` a categorías de Sketchfab y opcionalmente hace merge con los `curated-models` guardados en DB. La API key nunca se expone al cliente.
 
 **Checklist:**
-- [x] GET /sketchfab/search funciona
+- [x] GET /sketchfab/models funciona
 - [x] GET /sketchfab/models/:uid funciona
 - [x] API key no está expuesta en frontend
-- [ ] Rate limiting considerado (opcional)
-- [x] Frontend consumelibía desde API, no directo a Sketchfab
 
 ---
 
-### ITS-S3-API-010 — Endpoint CRUD de Collections | ✅ Betania
+### ITS-S3-API-009 — Endpoint público de campaña
 
-**Estado: ✅ Implementado** — 2026-05-26
+**Estado: ✅ Implementado** — 2026-05-24 · **Resuelto en modelar-core**
 
 **Responsable:** Betania
 
-Concepto genérico de agrupación por org (Serie para Santillana, Categoría para Garbarino, Sala para Museo MAR, Proyecto para Vega).
+`GET /api/campaigns/:id/public` permite al viewer público (ARPage) obtener los datos de una campaña sin autenticación. Devuelve `id`, `title`, `description`, `sector`, `sketchfab_uid`, `cta_url`, `qr_value` y `org_slug`, sin exponer `client_id` ni datos de analytics.
 
-**Endpoints:**
+---
 
-```
-GET    /api/collections          Auth: Requerida — lista colecciones de la org del cliente
-POST   /api/collections          Auth: Requerida — crea colección  { name, description? }
-PATCH  /api/collections/:id      Auth: Requerida — edita { name?, description? }
-DELETE /api/collections/:id      Auth: Requerida — elimina
-```
+### ITS-S3-API-010 — Endpoint CRUD de Collections
 
-**Migration:** `20260526000004-create-collections.js` — tabla `collections` con `id`, `org_slug`, `name`, `description`.  
-**Migration:** `20260526000005-alter-campaigns-cta-url-nullable.js` — hace `cta_url` nullable en `campaigns`.
+**Estado: ✅ Implementado** — 2026-05-26 · **Resuelto en modelar-core**
+
+**Responsable:** Betania
+
+CRUD completo de colecciones con aislamiento multi-tenant por `orgSlug`. Concepto genérico de agrupación (Serie, Categoría, Sala, Proyecto según el cliente). `cta_url` en campaigns pasó a ser opcional (nullable) en esta misma iteración.
+
+**Endpoints:** `GET /api/collections`, `POST /api/collections`, `PATCH /api/collections/:id`, `DELETE /api/collections/:id`.
 
 **Checklist:**
 - [x] GET /api/collections devuelve solo colecciones de la org del cliente
@@ -606,29 +82,51 @@ DELETE /api/collections/:id      Auth: Requerida — elimina
 - [x] PATCH /api/collections/:id valida orgSlug
 - [x] DELETE /api/collections/:id valida orgSlug
 - [x] `cta_url` en campaigns es ahora opcional (nullable)
-- [x] Migrations ejecutadas en DB
 
 ---
 
-### ITS-S3-API-011 — Suite de tests unitarios (jest) | ✅ Betania
+### ITS-S3-API-011 — Suite de tests unitarios (jest)
 
-**Estado: ✅ Implementado** — 2026-05-26
+**Estado: ✅ Implementado** — 2026-05-26 · **Resuelto en modelar-core**
 
 **Responsable:** Betania
 
-13 tests con jest + ts-jest. `uuid@14` (ESM) mapeado a mock CJS local.
-
-| Archivo | Tests | Qué cubre |
-|---------|-------|-----------|
-| `create-campaign.use-case.test.ts` | 5 | qrValue como URL, UUID asignado, ctaUrl opcional, clientId/orgSlug propagados |
-| `collections.use-cases.test.ts` | 8 | create/list/update/delete con mocks de repositorio |
+112 tests con jest + ts-jest cubriendo use cases de auth, campaigns, collections, analytics, curated models, organizations y sketchfab. UUID ESM mapeado a mock CJS local.
 
 **Checklist:**
-- [x] jest + ts-jest + supertest instalados
-- [x] `jest.config.js` con `preset: ts-jest`, `testEnvironment: node`
-- [x] Mock local de `uuid` para compatibilidad ESM/CJS
+- [x] jest + ts-jest instalados
+- [x] 112/112 tests pasan
 - [x] Script `pnpm test` configurado
-- [x] 13/13 tests pasan
+
+---
+
+## Cambios técnicos del gateway
+
+A partir de este sprint `modelAR-api` dejó de implementar lógica de negocio y pasó a funcionar como **gateway/proxy fino**, delegando todo a `modelar-core` (NestJS).
+
+**Rol del gateway:** Express puro, sin estado, sin DB. Recibe requests del frontend en el puerto 3000, aplica middleware transversal (helmet, cors, body-parser, x-request-id), reenvía a `${CORE_URL}` preservando headers de auth y tracing, y devuelve la respuesta del core tal cual. Si el core no responde (timeout 10 s) devuelve `503 SERVICE_UNAVAILABLE` con shape canónica.
+
+**Headers que se reenvían:** `Authorization` (el core valida el JWT), `x-request-id` (distributed tracing con pino), `x-forwarded-for` y `x-real-ip` (rate limiting por IP en el core para endpoints públicos).
+
+**Por qué core es repo separado:** `modelar-api` y `modelar-web` se comparten con el equipo y la cátedra. `modelar-core` contiene la lógica de negocio y los secretos de plataforma, queda restringido al owner. Cualquiera puede levantar el gateway local apuntándolo a la instancia productiva del core sin necesidad de acceso al código ni a credenciales de DB.
+
+**Recursos disponibles vía core:**
+
+| Recurso | Endpoints (prefijo `/api`) | Auth |
+|---------|----------------------------|------|
+| Auth | `register`, `login`, `refresh`, `logout`, `me` | Mixto |
+| Organizations | `GET`, `GET /:slug`, `POST`, `PATCH /:slug`, `DELETE /:slug` | Lectura cualquier auth · escritura SUPERADMIN |
+| Campaigns | CRUD por id · `/:id/public` sin auth | Cliente dueño |
+| Collections | CRUD por id | Multi-tenant por orgSlug |
+| Analytics | `POST /events` (público, rate-limited), `GET /campaigns/:id/analytics` | Mixto |
+| Sketchfab | `GET /sketchfab/models`, `GET /sketchfab/models/:uid` | Auth · merge curated models |
+| Curated Models | CRUD por id | SUPERADMIN |
+
+**Shape canónica de errores del core:**
+
+El gateway no formatea errores. Si el core falla con 4xx/5xx, devuelve el body tal cual (`code`, `message`, `statusCode`, `timestamp`, `path`, `requestId`, `details`). Si el core está caído o el timeout vence, el gateway responde con `503 SERVICE_UNAVAILABLE`.
+
+**`GET /health`:** además de reportar `ok` propio, consulta `${CORE_URL}/health` y devuelve el estado del upstream (`core: ok | unavailable`).
 
 ---
 
@@ -636,258 +134,16 @@ DELETE /api/collections/:id      Auth: Requerida — elimina
 
 ### ITS-S3-API-DOC-002 — Proxy OpenAPI spec | ⏳ Betania
 
-> **Reenfocado en Stage 4:** dado que `modelar-api` dejó de implementar lógica de negocio (ver §"Cambios técnicos del gateway"), el spec describe ahora la **superficie HTTP que el gateway proxya**, no un backend con DB. El gateway no transforma payloads — devuelve la respuesta del core tal cual. Por eso este spec documenta el contrato del proxy y referencia al core (servicio externo) como fuente de verdad de cada response.
+El spec describe la superficie HTTP que el gateway proxya. El gateway no transforma payloads — devuelve la respuesta del core tal cual. El spec documenta el contrato del proxy y referencia al core como fuente de verdad de cada response.
 
 **Archivo:** `openapi.yaml` en la raíz de `modelar-api`.
 
-```yaml
-openapi: 3.0.3
-info:
-  title: modelar-api (gateway)
-  version: 1.0.0
-  description: |
-    Gateway HTTP fino sin estado. Recibe requests del frontend, los reenvía
-    a `modelar-core` (NestJS, API externa) preservando los headers Authorization,
-    x-request-id, x-forwarded-for y x-real-ip. Devuelve el status y body del
-    upstream tal cual. Timeout 10s — si el core no responde, el gateway
-    devuelve 503 SERVICE_UNAVAILABLE con la forma canónica de error.
-
-servers:
-  - url: http://localhost:3000
-    description: Development local (CORE_URL apunta a http://localhost:4000)
-  - url: https://api.modelar.com
-    description: Producción
-
-components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-
-  schemas:
-    ErrorResponse:
-      type: object
-      properties:
-        error:
-          type: object
-          properties:
-            code:        { type: string, example: NOT_FOUND }
-            message:
-              oneOf:
-                - { type: string }
-                - { type: array, items: { type: string } }
-            statusCode:  { type: integer, example: 404 }
-            timestamp:   { type: string, format: date-time }
-            path:        { type: string }
-            requestId:   { type: string, format: uuid }
-            details:     { type: object, additionalProperties: true }
-
-    PaginatedResponse:
-      type: object
-      properties:
-        data: { type: array, items: { type: object } }
-        pagination:
-          type: object
-          properties:
-            page:       { type: integer }
-            limit:      { type: integer }
-            total:      { type: integer }
-            totalPages: { type: integer }
-
-paths:
-  /health:
-    get:
-      summary: Health del gateway + del core (upstream)
-      responses:
-        '200':
-          description: |
-            Reporta el estado propio (`status: ok`) y el del core
-            (`core: ok | unavailable`).
-
-  # === Auth (proxy a modelar-core) ===
-  /api/auth/register: { post: { $ref: '#/components/x-proxied' } }
-  /api/auth/login:    { post: { $ref: '#/components/x-proxied' } }
-  /api/auth/refresh:  { post: { $ref: '#/components/x-proxied' } }
-  /api/auth/logout:   { post: { $ref: '#/components/x-proxied' } }
-  /api/auth/me:       { get:  { $ref: '#/components/x-proxied-auth' } }
-
-  # === Campaigns (proxy) ===
-  /api/campaigns:                  { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
-  /api/campaigns/{id}:             { get: { $ref: '#/components/x-proxied-auth' }, patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
-  /api/campaigns/{id}/public:      { get: { $ref: '#/components/x-proxied' } }
-  /api/campaigns/{id}/analytics:   { get: { $ref: '#/components/x-proxied-auth' } }
-
-  # === Collections (proxy) ===
-  /api/collections:           { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
-  /api/collections/{id}:      { get: { $ref: '#/components/x-proxied-auth' }, patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
-
-  # === Analytics (proxy) ===
-  /api/events: { post: { $ref: '#/components/x-proxied' } }   # público, rate-limited en el core por IP
-
-  # === Sketchfab (proxy con cache+merge en el core) ===
-  /api/sketchfab/models:        { get: { $ref: '#/components/x-proxied-auth' } }
-  /api/sketchfab/models/{uid}:  { get: { $ref: '#/components/x-proxied-auth' } }
-
-  # === Curated Models (proxy — SUPERADMIN en el core) ===
-  /api/curated-models:        { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
-  /api/curated-models/{id}:   { patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
-
-  # === Organizations (proxy — escritura SUPERADMIN en el core) ===
-  /api/organizations:           { get: { $ref: '#/components/x-proxied-auth' }, post: { $ref: '#/components/x-proxied-auth' } }
-  /api/organizations/{slug}:    { get: { $ref: '#/components/x-proxied-auth' }, patch: { $ref: '#/components/x-proxied-auth' }, delete: { $ref: '#/components/x-proxied-auth' } }
-```
-
-**Notas:**
-
-- Las responses concretas (200/201/204/4xx) las define `modelar-core`. El gateway solo agrega `503` cuando el upstream falla. La forma canónica del error (`ErrorResponse`) está documentada arriba.
-- Los listados que paginan devuelven `PaginatedResponse` (`{ data, pagination }`). Los GET por id devuelven la entidad. Los DELETE devuelven `204 No Content`.
-- Bearer JWT es access token (vida 15m); el refresh se hace contra `POST /api/auth/refresh` con el refresh token en el body.
-- El gateway preserva los headers `Authorization`, `x-request-id`, `x-forwarded-for`, `x-real-ip`. Ningún otro header se reenvía.
-
 **Checklist:**
-
 - [ ] `openapi.yaml` creado en la raíz de `modelar-api`
 - [ ] Cubre las 24 rutas que el gateway expone
-- [ ] Documenta forma canónica de error (`ErrorResponse`) y paginada (`PaginatedResponse`)
+- [ ] Documenta shape canónica de error y paginada
 - [ ] Anota explícitamente que las responses concretas las define `modelar-core`
-- [ ] Validado con Swagger UI o Redoc local antes de incluir en el PDF de entrega
-
----
-
-## Cambios técnicos del gateway
-
-A partir de este sprint `modelar-api` deja de implementar lógica de negocio: pasa a funcionar como **gateway/proxy fino** y delega todo a un servicio externo, `modelar-core` (NestJS, repo privado `git@github.com:Mbetania/modelar-core.git`).
-
-### Rol del gateway
-
-Express puro, sin estado, sin DB. Solo:
-
-- Recibe requests del frontend en el puerto 3000.
-- Aplica middleware transversal (helmet, cors, body-parser, x-request-id).
-- Reenvía a `${CORE_URL}` preservando headers de auth y tracing.
-- Devuelve la respuesta del core tal cual (status code, body, content-type).
-- Si el core no responde (timeout 10s) devuelve `503 SERVICE_UNAVAILABLE` con shape canónica.
-
-Las 24 rutas `/api/*` se delegan a un único handler `forward(req, res)`. El gateway **no** conoce el modelo de datos, los use cases, ni las reglas de autorización: todo eso vive en el core.
-
-### Configuración
-
-```bash
-# modelar-api/.env
-PORT=3000
-CORE_URL=http://localhost:4000          # dev local
-# CORE_URL=https://core.modelar.app     # producción
-```
-
-Cualquier instancia del gateway es intercambiable: no guarda sesión, ni cache, ni conexiones a DB. Eso permite escalarlo horizontalmente sin coordinar estado.
-
-### Implementación de `forward()`
-
-`src/proxy/forward.ts` — reenvía cada request al core con un subset acotado de headers:
-
-```ts
-const FORWARDED_HEADERS = ['authorization', 'x-request-id', 'x-forwarded-for', 'x-real-ip'];
-
-export async function forward(req, res) {
-  const url = new URL(req.originalUrl, env.CORE_URL);
-
-  const headers = { 'Content-Type': 'application/json' };
-  for (const name of FORWARDED_HEADERS) {
-    const value = req.headers[name];
-    if (typeof value === 'string') headers[name] = value;
-  }
-
-  const hasBody = ['POST', 'PATCH', 'PUT'].includes(req.method);
-  const upstream = await fetch(url.toString(), {
-    method: req.method,
-    headers,
-    body: hasBody ? JSON.stringify(req.body) : undefined,
-    signal: controller.signal, // timeout 10s
-  });
-
-  res.status(upstream.status).send(await upstream.text());
-}
-```
-
-Por qué reenviar esos headers en particular:
-- **`Authorization`** — el core valida el JWT.
-- **`x-request-id`** — distributed tracing (el core loggea con pino e incluye el id).
-- **`x-forwarded-for` / `x-real-ip`** — el core los usa para rate limiting por IP en endpoints públicos (ej. `POST /api/events`).
-
-### Rutas agregadas en este sprint
-
-Las 5 rutas de Organizations se agregaron al registro de Express (todas delegadas a `forward`):
-
-```ts
-// Organizations (lectura para cualquier auth user; escritura solo SUPERADMIN)
-app.get('/api/organizations',         forward);
-app.get('/api/organizations/:slug',   forward);
-app.post('/api/organizations',        forward);
-app.patch('/api/organizations/:slug', forward);
-app.delete('/api/organizations/:slug', forward);
-```
-
-El identificador en URL es `slug` (kebab-case), no UUID. El gateway no valida el rol — `@Roles(Role.SUPERADMIN)` lo aplica el `RolesGuard` global del core.
-
-### Recursos disponibles via core
-
-| Recurso | Endpoints (prefijo `/api`) | Auth |
-|---------|----------------------------|------|
-| Auth | `register`, `login`, `refresh`, `logout`, `me` | Mixto |
-| **Organizations** (nuevo) | `GET`, `GET /:slug`, `POST`, `PATCH /:slug`, `DELETE /:slug` | Lectura cualquier auth · escritura SUPERADMIN |
-| Campaigns | CRUD por id | Cliente dueño · `/:id/public` sin auth |
-| Collections | CRUD por id | Multi-tenant por orgSlug |
-| Analytics | `POST /events` (público, rate-limited), `GET /campaigns/:id/analytics` | Mixto |
-| Sketchfab | `GET /sketchfab/models`, `GET /sketchfab/models/:uid` | Auth · cache Redis + merge curated models |
-| Curated Models | CRUD por id | SUPERADMIN |
-
-### Forma canónica de los errores
-
-El gateway no formatea errores: usa la shape canónica que devuelve el `DomainExceptionFilter` del core:
-
-```json
-{
-  "error": {
-    "code": "CONFLICT",
-    "message": "Organization with slug \"x\" already exists",
-    "statusCode": 409,
-    "timestamp": "2026-06-01T23:52:01.022Z",
-    "path": "/api/organizations",
-    "requestId": "82dcbf95-...",
-    "details": { "slug": "x" }
-  }
-}
-```
-
-Si el core está caído o el timeout vence:
-
-```json
-{
-  "error": {
-    "code": "SERVICE_UNAVAILABLE",
-    "message": "Core service unavailable",
-    "statusCode": 503
-  }
-}
-```
-
-### `GET /health`
-
-Además de reportar `ok` propio, consulta `${CORE_URL}/health` y devuelve el estado del upstream:
-
-```json
-{ "status": "ok", "core": "ok" }
-{ "status": "ok", "core": "unavailable" }
-```
-
-Útil para monitoreo y para que el frontend reaccione a degradaciones del backend.
-
-### Por qué core es repo separado y privado
-
-- `modelar-api` y `modelar-web` se van a compartir con otra gente del equipo / la cátedra para integrar o extender.
-- `modelar-core` contiene la lógica de negocio y los secretos de plataforma — queda restringido al owner.
-- Cualquiera puede levantar el gateway local apuntándolo a la instancia productiva del core, sin necesidad de acceso al código del core ni a credenciales de DB.
+- [ ] Validado con Swagger UI o Redoc local
 
 ---
 
@@ -896,16 +152,15 @@ Además de reportar `ok` propio, consulta `${CORE_URL}/health` y devuelve el est
 - [x] GET /api/campaigns/:id/analytics funciona
 - [x] Calcula stats y breakdown
 - [x] POST /api/events funciona (público, sin auth)
-- [x] GET /api/sketchfab/search funciona (proxy, API key no expuesta)
+- [x] GET /api/sketchfab/models funciona (proxy, API key no expuesta)
 - [x] GET /api/sketchfab/models/:uid funciona
-- [x] API key de Sketchfab no expuesta al cliente
-- [x] GET/POST/PATCH/DELETE /api/collections — CRUD completo con isolación por org
+- [x] GET/POST/PATCH/DELETE /api/collections — CRUD completo con aislamiento por org
 - [x] cta_url nullable en campaigns
-- [x] 13 tests unitarios (jest) — use-cases de campaigns y collections
-- [x] modelar-api convertido en gateway/proxy fino — toda la lógica delegada a modelar-core (servicio externo)
-- [x] 5 rutas de Organizations agregadas al gateway (GET / GET:slug / POST / PATCH / DELETE)
-- [x] `CORE_URL` configurable por env, timeout 10s con 503 canónico ante fallo del upstream
-- [x] `/health` reporta el estado del core además del propio
-- [ ] OpenAPI spec actualizada
+- [x] 112 tests unitarios (jest) en modelar-core
+- [x] modelar-api convertido en gateway/proxy fino
+- [x] 5 rutas de Organizations agregadas al gateway
+- [x] CORE_URL configurable por env, timeout 10s con 503 canónico
+- [x] /health reporta el estado del core
+- [ ] OpenAPI spec creada
 
 ---

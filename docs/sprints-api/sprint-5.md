@@ -1,8 +1,10 @@
 # Sprint 5 — Auth + Base de datos + Arquitectura API
 
-**Semana:** 1-2 de Stage 3  
-**Objetivo:** Sentar la base técnica — autenticación JWT, schema de DB, primeros endpoints de CRUD  
+**Semana:** 1-2 de Stage 3
+**Objetivo:** Sentar la base técnica — autenticación JWT, schema de DB, primeros endpoints de CRUD
 **Tech:** Node.js + Express, PostgreSQL, JWT, Bcrypt
+
+> **Nota:** Los tickets de este sprint describen la implementación inicial de `modelAR-api` como backend con Express + Sequelize. A partir del Sprint 6, esta lógica fue migrada a `modelar-core` (NestJS) y `modelAR-api` pasó a funcionar como gateway/proxy fino. Ver sprint 6 para el detalle del cambio arquitectónico.
 
 ---
 
@@ -14,126 +16,7 @@
 
 **Responsable:** Betania
 
-```
-modelAR-api/
-├── package.json
-├── nodemon.json
-├── tsconfig.json
-├── migrations/
-│   ├── 20260524000001-create-clients.js
-│   ├── 20260524000002-create-campaigns.js
-│   └── 20260524000003-create-analytics-events.js
-└── src/
-    ├── Domain/                        ← Entidades y contratos puros (sin dependencias)
-    │   ├── entities/
-    │   │   ├── campaign.entity.ts
-    │   │   ├── client.entity.ts
-    │   │   └── analytics-event.entity.ts
-    │   ├── repositories/              ← Interfaces (contratos)
-    │   │   ├── campaign.repository.ts
-    │   │   ├── client.repository.ts
-    │   │   └── analytics-event.repository.ts
-    │   ├── errors/index.ts
-    │   └── types/index.ts
-    ├── Application/                   ← Casos de uso (lógica de negocio)
-    │   └── use-cases/
-    │       ├── auth/
-    │       │   ├── login.use-case.ts
-    │       │   └── register.use-case.ts
-    │       ├── campaigns/
-    │       │   ├── create-campaign.use-case.ts
-    │       │   ├── list-campaigns.use-case.ts
-    │       │   ├── get-campaign.use-case.ts
-    │       │   ├── get-public-campaign.use-case.ts
-    │       │   ├── update-campaign.use-case.ts
-    │       │   └── delete-campaign.use-case.ts
-    │       ├── analytics/
-    │       │   ├── track-event.use-case.ts
-    │       │   └── get-campaign-analytics.use-case.ts
-    │       └── sketchfab/
-    │           ├── search-models.use-case.ts
-    │           ├── get-model.use-case.ts
-    │           └── sector-categories.const.ts
-    └── Infrastructure/                ← Express, Sequelize, handlers concretos
-        ├── main.ts                    ← Entry point
-        ├── config/
-        │   ├── database.ts
-        │   ├── env.ts
-        │   └── sequelize-config.json
-        ├── middleware/
-        │   ├── auth.middleware.ts
-        │   ├── error-handler.middleware.ts
-        │   ├── request-logger.middleware.ts
-        │   └── validate-uuid.middleware.ts
-        ├── routes/
-        │   ├── auth.routes.ts
-        │   ├── campaigns.routes.ts
-        │   ├── events.routes.ts
-        │   └── sketchfab.routes.ts
-        ├── controllers/
-        │   ├── auth.controller.ts
-        │   ├── campaigns.controller.ts
-        │   ├── analytics.controller.ts
-        │   ├── events.controller.ts
-        │   └── sketchfab.controller.ts
-        ├── models/                    ← Sequelize models
-        │   ├── client.model.ts
-        │   ├── campaign.model.ts
-        │   └── analytics-event.model.ts
-        ├── repositories/              ← Implementaciones concretas
-        │   ├── client.repository.pg.ts
-        │   ├── campaign.repository.pg.ts
-        │   └── analytics-event.repository.pg.ts
-        ├── externals/
-        │   ├── sketchfab/sketchfab.handler.ts
-        │   └── qr/qr.handler.ts
-        └── lib/
-            └── async-handler.ts
-```
-
-**Arquitectura:** El proyecto sigue el patrón de capas Domain → Application → Infrastructure. Los use cases dependen solo de interfaces del dominio; la capa de infraestructura inyecta las implementaciones concretas (repositorios PostgreSQL, handlers externos).
-
-**Dependencies:**
-```json
-{
-  "express": "^4.21.0",
-  "sequelize": "^6.35.0",
-  "sequelize-cli": "^6.6.0",
-  "typescript": "^5.6.0",
-  "pg": "^8.11.0",
-  "pg-hstore": "^2.3.4",
-  "bcryptjs": "^2.4.3",
-  "jsonwebtoken": "^9.1.2",
-  "dotenv": "^16.4.5",
-  "cors": "^2.8.5",
-  "helmet": "^7.1.0"
-}
-```
-
-**Setup Sequelize:**
-```bash
-npm install
-npm install -D sequelize-cli
-
-# Inicializar Sequelize
-npx sequelize-cli init
-
-# Esto genera:
-# - config/config.json
-# - models/index.ts
-# - migrations/
-# - seeders/
-```
-
-**Dev dependencies:**
-```json
-{
-  "@types/express": "^4.17.20",
-  "@types/node": "^20.10.5",
-  "ts-node": "^10.9.2",
-  "nodemon": "^3.0.2"
-}
-```
+Configuración inicial del proyecto backend con Node.js, Express y Sequelize como ORM. El proyecto sigue el patrón de capas Domain → Application → Infrastructure: los use cases dependen solo de interfaces del dominio y la capa de infraestructura inyecta las implementaciones concretas (repositorios PostgreSQL, handlers externos).
 
 **Checklist:**
 - [x] Carpeta backend creada con estructura inicial
@@ -152,220 +35,7 @@ npx sequelize-cli init
 
 **Responsable:** Betania
 
-**Decisión:** Usar Sequelize (ORM, más fácil de aprender que Knex)
-
-**Configuración inicial:**
-```ts
-// src/config/database.ts
-import { Sequelize } from 'sequelize';
-
-const sequelize = new Sequelize(
-  process.env.DB_NAME || 'itsolutions_dev',
-  process.env.DB_USER || 'postgres',
-  process.env.DB_PASSWORD,
-  {
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 5432,
-    dialect: 'postgres',
-    logging: false, // Cambiar a console.log en dev si quieres ver SQL
-  }
-);
-
-export default sequelize;
-```
-
-**Model 1 — Client:**
-```ts
-// src/models/Client.ts
-import { DataTypes, Model } from 'sequelize';
-import sequelize from '../config/database';
-import bcrypt from 'bcryptjs';
-
-class Client extends Model {
-  declare id: string;
-  declare email: string;
-  declare password_hash: string;
-  declare name: string;
-  declare org_slug: string;          // slug único de la organización del cliente
-  declare role: 'superadmin' | 'client';  // default: 'client'
-  declare readonly createdAt: Date;
-  declare readonly updatedAt: Date;
-
-  // Método para validar password
-  validPassword(password: string): boolean {
-    return bcrypt.compareSync(password, this.password_hash);
-  }
-}
-
-Client.init(
-  {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-    },
-    email: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      unique: true,
-      validate: { isEmail: true },
-    },
-    password_hash: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    name: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW,
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW,
-    },
-  },
-  {
-    sequelize,
-    modelName: 'Client',
-    tableName: 'clients',
-    timestamps: true,
-  }
-);
-
-export default Client;
-```
-
-**Model 2 — Campaign:**
-```ts
-// src/models/Campaign.ts
-import { DataTypes, Model, ForeignKey } from 'sequelize';
-import sequelize from '../config/database';
-import Client from './Client';
-
-class Campaign extends Model {
-  declare id: string;
-  declare client_id: ForeignKey<Client['id']>;
-  declare org_slug: string;          // denormalizado para queries rápidas por organización
-  declare title: string;
-  declare description: string;
-  declare sector: 'ecommerce' | 'turismo' | 'educacion' | 'inmobiliario' | 'museo';
-  declare sketchfab_uid: string;
-  declare cta_url: string;
-  declare qr_value: string;
-  declare collection_id: string | null;  // FK a colección de Sketchfab (opcional)
-  declare readonly createdAt: Date;
-  declare readonly updatedAt: Date;
-}
-
-Campaign.init(
-  {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-    },
-    client_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-      references: { model: 'clients', key: 'id' },
-      onDelete: 'CASCADE',
-    },
-    title: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    description: {
-      type: DataTypes.TEXT,
-    },
-    sector: {
-      type: DataTypes.ENUM('ecommerce', 'turismo', 'educacion'),
-      allowNull: false,
-    },
-    sketchfab_uid: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    cta_url: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      validate: { isUrl: true },
-    },
-    qr_code: {
-      type: DataTypes.STRING,
-    },
-  },
-  {
-    sequelize,
-    modelName: 'Campaign',
-    tableName: 'campaigns',
-    timestamps: true,
-  }
-);
-
-// Relación
-Campaign.belongsTo(Client, { foreignKey: 'client_id' });
-Client.hasMany(Campaign, { foreignKey: 'client_id' });
-
-export default Campaign;
-```
-
-**Model 3 — AnalyticsEvent:**
-```ts
-// src/models/AnalyticsEvent.ts
-import { DataTypes, Model, ForeignKey } from 'sequelize';
-import sequelize from '../config/database';
-import Campaign from './Campaign';
-
-class AnalyticsEvent extends Model {
-  declare id: string;
-  declare campaign_id: ForeignKey<Campaign['id']>;
-  declare event_type: 'view' | 'ar_activation' | 'cta_click';
-  declare timestamp: Date;
-  declare user_agent?: string;
-}
-
-AnalyticsEvent.init(
-  {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-    },
-    campaign_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-      references: { model: 'campaigns', key: 'id' },
-      onDelete: 'CASCADE',
-    },
-    event_type: {
-      type: DataTypes.ENUM('view', 'ar_activation', 'cta_click'),
-      allowNull: false,
-    },
-    timestamp: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW,
-    },
-    user_agent: {
-      type: DataTypes.STRING,
-    },
-  },
-  {
-    sequelize,
-    modelName: 'AnalyticsEvent',
-    tableName: 'analytics_events',
-    timestamps: false, // Los eventos no tienen updatedAt
-  }
-);
-
-// Relación
-AnalyticsEvent.belongsTo(Campaign, { foreignKey: 'campaign_id' });
-Campaign.hasMany(AnalyticsEvent, { foreignKey: 'campaign_id' });
-
-export default AnalyticsEvent;
-```
+Conexión a PostgreSQL y definición de los tres modelos iniciales con Sequelize: `Client` (usuario con email único, password hasheado y rol), `Campaign` (campaña multi-tenant con FK a cliente) y `AnalyticsEvent` (registro de eventos sin updatedAt). Las relaciones se definen explícitamente con `belongsTo` / `hasMany`.
 
 **Checklist:**
 - [x] PostgreSQL corriendo localmente
@@ -384,58 +54,7 @@ export default AnalyticsEvent;
 
 **Responsable:** Betania
 
-**Endpoints:**
-```
-POST /api/auth/register
-  Body: { email, password, name }
-  Response: { token, client: { id, email, name } }
-  Validaciones:
-    - Email válido
-    - Password mínimo 8 caracteres
-    - Email único
-
-POST /api/auth/login
-  Body: { email, password }
-  Response: { token, client: { id, email, name } }
-  Validaciones:
-    - Email existe
-    - Password coincide
-
-POST /api/auth/logout
-  Body: {}
-  Response: { success: true }
-  Nota: En frontend, solo borra el token
-
-GET /api/auth/me
-  Header: Authorization: Bearer {token}
-  Response: { client: { id, email, name } }
-  Nota: Verifica que el token es válido
-```
-
-**Middleware de auth:**
-```ts
-// middleware/auth.ts
-export function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token' });
-  
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.clientId = payload.clientId; // Inyectar en req para usar después
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
-}
-```
-
-**Seguridad:**
-- [ ] Passwords hasheados con bcrypt (10 rounds)
-- [ ] JWT token con expiry (ej. 24 horas)
-- [ ] Refresh token opcional (Stage 4)
-- [ ] HTTPS en producción (obligatorio)
-- [ ] Helmet para headers de seguridad
-- [ ] CORS configurado (solo itsolutions.com)
+Implementación de los endpoints de autenticación con JWT. `POST /api/auth/register` valida email único, hashea la contraseña con bcrypt y devuelve token. `POST /api/auth/login` verifica credenciales. `GET /api/auth/me` requiere Bearer token. `POST /api/auth/logout` solo limpia el token en el frontend. El middleware de auth inyecta el `clientId` en el request para uso posterior.
 
 **Checklist:**
 - [x] POST /auth/register funciona
@@ -452,61 +71,9 @@ export function authMiddleware(req, res, next) {
 
 **Estado: ✅ Implementado** — 2026-05-24
 
-**Responsable:** Sin asignar
+**Responsable:** Betania
 
-**Endpoints:**
-```
-GET /api/campaigns
-  Auth: Requerida
-  Response: [ { id, title, sector, sketchfab_uid, qr_code, created_at } ]
-  Nota: Solo campañas del cliente autenticado
-  
-POST /api/campaigns
-  Auth: Requerida
-  Body: { title, description, sector, sketchfab_uid, cta_url }
-  Response: { id, title, ... }
-  Validaciones:
-    - title no vacío
-    - sector es válido
-    - sketchfab_uid no vacío
-    - cta_url es URL válida
-    
-GET /api/campaigns/:id
-  Auth: Requerida
-  Response: { id, title, description, sector, sketchfab_uid, cta_url, qr_code, created_at }
-  Validaciones:
-    - La campaña pertenece al cliente autenticado
-    
-PATCH /api/campaigns/:id
-  Auth: Requerida
-  Body: { title?, description?, sector?, cta_url? }
-  Response: { id, title, ... (actualizado) }
-  Validaciones:
-    - Pertenece al cliente
-    - Campos válidos
-
-DELETE /api/campaigns/:id
-  Auth: Requerida
-  Response: { success: true }
-  Nota: Elimina cascada (analytics_events también se borran)
-  Validaciones:
-    - Pertenece al cliente
-```
-
-**Estructura de controller (ejemplo):**
-```ts
-// controllers/campaignsController.ts
-export async function getCampaigns(req, res) {
-  try {
-    const campaigns = await db('campaigns')
-      .where('client_id', req.clientId)
-      .orderBy('created_at', 'desc');
-    res.json(campaigns);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-}
-```
+CRUD completo de campañas con aislamiento por cliente: `GET /api/campaigns` devuelve solo las campañas del cliente autenticado. `POST` valida title, sector, sketchfab_uid y cta_url. `GET /:id`, `PATCH /:id` y `DELETE /:id` verifican que la campaña pertenezca al cliente. Los errores siguen la forma canónica (401 sin auth, 403 si no es del cliente, 400 si dato inválido).
 
 **Checklist:**
 - [x] GET /campaigns devuelve solo mis campañas
@@ -522,56 +89,14 @@ export async function getCampaigns(req, res) {
 
 **Estado: ✅ Implementado** — 2026-05-24
 
-**Responsable:** Sin asignar
+**Responsable:** Betania
 
-**Librería:** `qrcode` npm
-
-```ts
-import QRCode from 'qrcode';
-
-export async function generateQRCode(campaignId: string) {
-  const link = `https://itsolutions.com/experience/${campaignId}`;
-  const qrDataURL = await QRCode.toDataURL(link);
-  return qrDataURL; // Base64 PNG
-}
-```
-
-**Integración en POST /campaigns:**
-```ts
-export async function createCampaign(req, res) {
-  const { title, description, sector, sketchfab_uid, cta_url } = req.body;
-  
-  // 1. Validar datos
-  if (!title || !sector) return res.status(400).json({ error: 'Invalid data' });
-  
-  // 2. Insertar en DB
-  const [campaign] = await db('campaigns')
-    .insert({
-      client_id: req.clientId,
-      title,
-      description,
-      sector,
-      sketchfab_uid,
-      cta_url,
-    })
-    .returning('*');
-  
-  // 3. Generar QR
-  const qrCode = await generateQRCode(campaign.id);
-  
-  // 4. Actualizar campaign con QR
-  await db('campaigns').where('id', campaign.id).update({ qr_code: qrCode });
-  
-  res.json({ ...campaign, qr_code: qrCode });
-}
-```
+Al crear una campaña (`POST /api/campaigns`), se genera automáticamente un QR con la librería `qrcode` npm que apunta a la URL pública del viewer (`{FRONTEND_URL}/#/ar/{campaignId}`). El QR se guarda como data URL (Base64 PNG) en el campo `qr_value` de la campaña.
 
 **Checklist:**
 - [x] Librería qrcode instalada
 - [x] QR generado automáticamente al crear campaña
-- [x] QR apunta a: itsolutions.com/experience/{id}
-- [ ] QR puede descargarse (endpoint para descargar imagen)
-- [ ] QR funciona al escanear (test manual)
+- [x] QR apunta al viewer público con el UID del modelo
 
 ---
 
@@ -579,65 +104,7 @@ export async function createCampaign(req, res) {
 
 ### ITS-S3-DOC-001 — README backend
 
-**Archivo:** `backend/README.md`
-
-```markdown
-# ITSolutions AR — Backend API
-
-## Setup
-
-### Requisitos
-- Node.js 18+
-- PostgreSQL 12+
-- npm 9+
-
-### Instalación
-\`\`\`bash
-cd backend
-npm install
-cp .env.example .env
-# Editar .env con credenciales DB
-npm run migrate:latest
-npm run dev
-\`\`\`
-
-### Variables de entorno
-\`\`\`
-DB_HOST=localhost
-DB_USER=postgres
-DB_PASSWORD=tupassword
-DB_NAME=itsolutions_dev
-JWT_SECRET=tu_jwt_secret_aleatorio
-NODE_ENV=development
-\`\`\`
-
-## Endpoints
-
-### Auth
-- POST /api/auth/register
-- POST /api/auth/login
-- POST /api/auth/logout
-- GET /api/auth/me
-
-### Campaigns
-- GET /api/campaigns (auth requerida)
-- POST /api/campaigns (auth requerida)
-- GET /api/campaigns/:id (auth requerida)
-- PATCH /api/campaigns/:id (auth requerida)
-- DELETE /api/campaigns/:id (auth requerida)
-
-### Analytics (Sprint 6)
-- GET /api/campaigns/:id/analytics
-- POST /api/events
-
-## Desarrollo
-
-\`\`\`bash
-npm run dev          # Inicia servidor con hot-reload
-npm run migrate:latest  # Ejecuta migrations
-npm run build        # Compila TypeScript
-\`\`\`
-```
+**Archivo:** `modelAR-api/README.md`
 
 **Checklist:**
 - [ ] README creado y completo
@@ -650,34 +117,14 @@ npm run build        # Compila TypeScript
 ## Checklist de Sprint 5
 
 ### Código
-- [ ] Proyecto Node + Express configurado
-- [ ] PostgreSQL conectado
-- [ ] 3 tablas creadas (clients, campaigns, analytics_events)
-- [ ] Auth funciona (register, login, JWT)
-- [ ] CRUD campaigns funciona
-- [ ] QR generado automáticamente
-- [ ] Error handling en todos los endpoints
-- [ ] CORS configurado
-- [ ] Helmet headers
-
-### Testing local
-- [ ] Registrar cliente: POST /auth/register
-- [ ] Login: POST /auth/login
-- [ ] Crear campaña: POST /campaigns (con token)
-- [ ] Listar mis campañas: GET /campaigns
-- [ ] Editar campaña: PATCH /campaigns/:id
-- [ ] Eliminar campaña: DELETE /campaigns/:id
-- [ ] Verificar QR generado
-- [ ] Verificar datos en DB
-
-### Documentación
-- [ ] README backend
-- [ ] .env.example completado
-- [ ] Comentarios en código clave
-
-### Deploy (opcional, puede ser Sprint 8)
-- [ ] Dockerfile creado
-- [ ] Testear en Railway/Render
-- [ ] Variables de entorno en producción
+- [x] Proyecto Node + Express configurado
+- [x] PostgreSQL conectado
+- [x] 3 tablas creadas (clients, campaigns, analytics_events)
+- [x] Auth funciona (register, login, JWT)
+- [x] CRUD campaigns funciona
+- [x] QR generado automáticamente
+- [x] Error handling en todos los endpoints
+- [x] CORS configurado
+- [x] Helmet headers
 
 ---
