@@ -63,6 +63,9 @@ app.post('/api/events', forward);
 // Sketchfab (con merge de curated-models en el core)
 app.get('/api/sketchfab/models', forward);
 app.get('/api/sketchfab/models/:uid', forward);
+// Download del GLB para el visor AR público (el core valida que el uid
+// pertenezca a una campaña ACTIVE; @Public en el core).
+app.get('/api/sketchfab/models/:uid/download', forward);
 
 // Curated models (admin only — el core valida @Roles(SUPERADMIN))
 app.get('/api/curated-models', forward);
