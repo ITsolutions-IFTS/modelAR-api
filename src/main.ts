@@ -49,6 +49,8 @@ app.patch('/api/campaigns/:id', forward);
 app.delete('/api/campaigns/:id', forward);
 app.get('/api/campaigns/:id/public', forward);
 app.get('/api/campaigns/:id/analytics', forward);
+// Resolución pública uid -> campañaId para el tracking del visor AR.
+app.get('/api/campaigns/by-uid/:uid', forward);
 
 // Collections
 app.get('/api/collections', forward);
@@ -59,6 +61,9 @@ app.delete('/api/collections/:id', forward);
 
 // Analytics events (publico, rate-limited en el core por IP via x-forwarded-for)
 app.post('/api/events', forward);
+
+// Catálogo público del home (destacados: curados sketchfab + locales).
+app.get('/api/catalog/featured', forward);
 
 // Sketchfab (con merge de curated-models en el core)
 app.get('/api/sketchfab/models', forward);
