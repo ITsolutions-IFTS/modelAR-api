@@ -1,12 +1,12 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { type Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
 import { env } from './config/env';
 import { forward } from './proxy/forward';
 
-const app = express();
+const app: Express = express();
 
 app.set('trust proxy', true);
 
